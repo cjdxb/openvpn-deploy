@@ -158,6 +158,7 @@ push "dhcp-option DNS 1.1.1.1"
 push "dhcp-option DNS 8.8.8.8"
 
 keepalive 10 120
+mssfix 1400
 persist-tun
 user nobody
 group nogroup

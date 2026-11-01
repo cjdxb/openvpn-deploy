@@ -38,6 +38,7 @@ persist-tun
 remote-cert-tls server
 auth SHA256
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+mssfix 1400
 verb 3
 CONF
 echo "<ca>"; cat $PKI/ca.crt; echo "</ca>"
