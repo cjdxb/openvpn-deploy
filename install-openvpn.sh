@@ -91,13 +91,18 @@ esac
 . /etc/os-release
 CODENAME="${VERSION_CODENAME:?无法识别系统代号}"
 
-echo "公网IP=$PUBLIC_IP  出口网卡=$WAN_IF  网段=${VPN_PREFIX}.0/24  动态池=${VPN_PREFIX}.${POOL_START}-${VPN_PREFIX}.${POOL_END}  端口=$PORT(udp+tcp)  系统=$CODENAME"
+# 防火墙后端：nftables 服务在运行就用 nft，否则用 iptables
+if command -v nft >/dev/null && systemctl is-active --quiet nftables; then FW=nftables; else FW=iptables; fi
+
+echo "公网IP=$PUBLIC_IP  出口网卡=$WAN_IF  网段=${VPN_PREFIX}.0/24  动态池=${VPN_PREFIX}.${POOL_START}-${VPN_PREFIX}.${POOL_END}  端口=$PORT(udp+tcp)  防火墙=$FW  系统=$CODENAME"
 
 # ---------- 1. 安装 OpenVPN 2.7（官方源）与 easy-rsa ----------
 log "安装 OpenVPN 2.7 与 easy-rsa"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates iptables easy-rsa >/dev/null
+PKGS="curl ca-certificates easy-rsa"
+[ "$FW" = iptables ] && PKGS="$PKGS iptables"
+apt-get install -y -qq $PKGS >/dev/null
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://swupdate.openvpn.net/repos/repo-public.gpg -o /etc/apt/keyrings/openvpn-repo-public.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/openvpn-repo-public.asc] https://build.openvpn.net/debian/openvpn/stable $CODENAME main" \
@@ -162,12 +167,33 @@ explicit-exit-notify 1
 EOF
 
 # ---------- 4. IP 转发 + NAT（随服务启停）----------
-log "配置 IP 转发与 NAT（出口 $WAN_IF）"
+log "配置 IP 转发与 NAT（出口 $WAN_IF，$FW）"
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn.conf
 sysctl -q -p /etc/sysctl.d/99-openvpn.conf
 NET="${VPN_PREFIX}.0/24"
 mkdir -p /etc/systemd/system/openvpn-server@server.service.d
-cat > /etc/systemd/system/openvpn-server@server.service.d/nat.conf <<EOF
+if [ "$FW" = nftables ]; then
+  # 独立的 ip openvpn 表，停服务时整表删除；开头先建再删，重复加载不会叠加规则
+  NFT=$(command -v nft)
+  cat > "$SRV/nat.nft" <<EOF
+table ip openvpn
+delete table ip openvpn
+table ip openvpn {
+  chain postrouting {
+    type nat hook postrouting priority 100; policy accept;
+    ip saddr $NET oifname "$WAN_IF" masquerade
+  }
+}
+EOF
+  cat > /etc/systemd/system/openvpn-server@server.service.d/nat.conf <<EOF
+[Service]
+ExecStartPost=$NFT -f $SRV/nat.nft
+ExecStopPost=-$NFT delete table ip openvpn
+EOF
+  echo "nftables 规则写在独立的 ip openvpn 表中；若你的 nftables 配置里 input/forward 链默认 drop，"
+  echo "需自行放行 $PORT/udp、$PORT/tcp 入站及 ovpn0 <-> $WAN_IF 转发；systemctl restart nftables 会清掉本表，之后需重启 openvpn-server@server"
+else
+  cat > /etc/systemd/system/openvpn-server@server.service.d/nat.conf <<EOF
 [Service]
 ExecStartPost=/usr/sbin/iptables -t nat -A POSTROUTING -s $NET -o $WAN_IF -j MASQUERADE
 ExecStartPost=/usr/sbin/iptables -I FORWARD -i ovpn0 -o $WAN_IF -s $NET -j ACCEPT
@@ -176,6 +202,7 @@ ExecStopPost=/usr/sbin/iptables -t nat -D POSTROUTING -s $NET -o $WAN_IF -j MASQ
 ExecStopPost=/usr/sbin/iptables -D FORWARD -i ovpn0 -o $WAN_IF -s $NET -j ACCEPT
 ExecStopPost=/usr/sbin/iptables -D FORWARD -i $WAN_IF -o ovpn0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 EOF
+fi
 if command -v ufw >/dev/null && [[ "$(LC_ALL=C ufw status)" == "Status: active"* ]]; then
   ufw allow "$PORT"/udp >/dev/null; ufw allow "$PORT"/tcp >/dev/null
   echo "ufw 已放行 $PORT/udp、$PORT/tcp"

@@ -44,7 +44,7 @@ if [ ${#paths[@]} -gt 0 ]; then
   (umask 077; tar czf "$BAK" "${paths[@]}" 2>/dev/null)
 fi
 
-# ---------- 2. 停服务（ExecStopPost 会删掉 NAT/FORWARD 规则，必须在删 drop-in 之前）----------
+# ---------- 2. 停服务（ExecStopPost 会删掉 iptables NAT/FORWARD 规则或 nftables 的 ip openvpn 表，必须在删 drop-in 之前）----------
 log "停止并禁用 openvpn-server@server"
 systemctl disable --now openvpn-server@server 2>/dev/null || true
 rm -rf /etc/systemd/system/openvpn-server@server.service.d
