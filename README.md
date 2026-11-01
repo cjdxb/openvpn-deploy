@@ -23,6 +23,7 @@ openvpn-deploy/
 ├── install-openvpn.sh   # 一键部署（运行一次）
 ├── add-client.sh        # 新增客户端
 ├── revoke-client.sh     # 吊销客户端并清理残留
+├── uninstall-openvpn.sh # 一键卸载（撤销部署的全部改动）
 ├── clients/             # 生成的客户端 .ovpn（运行后自动创建，已在 .gitignore 中忽略）
 └── README.md            # 本教程
 ```
@@ -167,7 +168,27 @@ timeout 12 openvpn --config clients/client100.ovpn --route-nopull --dev tun9 | g
 - **`.ovpn` 和备份文件里都有私钥**，权限要设为 600，不要提交到 git，也不要放到公开的地方。项目的 `.gitignore` 已忽略 `clients/` 和 `*.ovpn`。
 - 本机装了 Docker 也没问题，FORWARD 规则用 `-I` 插在链首，不会被 Docker 的规则拦下。
 
-## 7. 回退到发行版自带版本
+## 7. 卸载
+
+```bash
+./uninstall-openvpn.sh        # 输入 yes 确认
+./uninstall-openvpn.sh -y     # 跳过确认（非交互运行时必须加）
+```
+
+脚本会做这些事：
+1. 把 `/etc/openvpn` 和 `clients/` 备份到 `/root/openvpn-backup-<时间>.tgz`（权限 600，内含私钥）
+2. 停止并禁用服务（NAT/FORWARD 规则随之删除），删除 systemd drop-in
+3. 删除 ufw 放行规则、`/etc/sysctl.d/99-openvpn.conf`
+4. 删除 PKI、服务端配置、`ovpn.env`、`/var/log/openvpn`、`clients/`
+5. 卸载 `openvpn`、`easy-rsa`，删除官方 apt 源和密钥
+
+注意：
+- **卸载后 CA 无法找回，已发出的 `.ovpn` 全部失效**。要恢复只能从备份解压回原位置：`tar xzf /root/openvpn-backup-*.tgz -C /`，再重装软件包。
+- IP 转发不会立即关闭（Docker 等可能依赖），重启后恢复系统默认。
+- `curl`、`ca-certificates`、`iptables` 会保留。
+- 云厂商安全组里的 UDP/TCP 1194 规则需要自己去删。
+
+## 8. 回退到发行版自带版本
 
 ```bash
 rm /etc/apt/sources.list.d/openvpn-aptrepo.list && apt-get update
