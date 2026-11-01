@@ -98,6 +98,8 @@ PUBLIC_IP=1.2.3.4 WAN_IF=eth0 ./install-openvpn.sh --net 10.93.2.0/24
 
 **③ 放行端口**：在云厂商的安全组或防火墙里放行 **UDP 和 TCP 的监听端口（默认 1194）入站**。服务器本机的 ufw 如果开着，脚本会自动放行。
 
+**防火墙后端**：安装时如果检测到 `nftables` 服务在运行，NAT 规则会写进独立的 nftables 表 `ip openvpn`（规则文件 `/etc/openvpn/server/nat.nft`）；否则用 iptables。nftables 模式下，如果你自己的 nftables 配置里 input/forward 链默认 drop，要自己放行监听端口和 `ovpn0` 的转发；执行 `systemctl restart nftables` 会清掉 `ip openvpn` 表，之后需要重启 `openvpn-server@server`。
+
 ## 2. 新增客户端
 
 ```bash
@@ -136,7 +138,8 @@ scp root@<服务器IP>:<项目目录>/clients/client100.ovpn .
 systemctl status openvpn-server@server            # active (running)
 ss -lnup | grep 1194; ss -lntp | grep 1194        # UDP 和 TCP 都在监听，同一个 pid
 ip -4 addr show ovpn0                             # 10.93.1.1/24
-iptables -t nat -S POSTROUTING | grep 10.93.1     # MASQUERADE 规则
+iptables -t nat -S POSTROUTING | grep 10.93.1     # MASQUERADE 规则（iptables 模式）
+nft list table ip openvpn                         # MASQUERADE 规则（nftables 模式）
 journalctl -u openvpn-server@server -n 30         # 不应有 WARNING / DEPRECATED
 ```
 
@@ -178,7 +181,7 @@ timeout 12 openvpn --config clients/client100.ovpn --route-nopull --dev tun9 | g
 
 脚本会做这些事：
 1. 把 `/etc/openvpn` 和 `clients/` 备份到 `/root/openvpn-backup-<时间>.tgz`（权限 600，内含私钥）
-2. 停止并禁用服务（NAT/FORWARD 规则随之删除），删除 systemd drop-in
+2. 停止并禁用服务（iptables NAT/FORWARD 规则或 nftables 的 `ip openvpn` 表随之删除），删除 systemd drop-in
 3. 删除 ufw 放行规则、`/etc/sysctl.d/99-openvpn.conf`
 4. 删除 PKI、服务端配置、`ovpn.env`、`/var/log/openvpn`、`clients/`
 5. 卸载 `openvpn`、`easy-rsa`，删除官方 apt 源和密钥
@@ -186,7 +189,7 @@ timeout 12 openvpn --config clients/client100.ovpn --route-nopull --dev tun9 | g
 注意：
 - **卸载后 CA 无法找回，已发出的 `.ovpn` 全部失效**。要恢复只能从备份解压回原位置：`tar xzf /root/openvpn-backup-*.tgz -C /`，再重装软件包。
 - IP 转发不会立即关闭（Docker 等可能依赖），重启后恢复系统默认。
-- `curl`、`ca-certificates`、`iptables` 会保留。
+- `curl`、`ca-certificates`、`iptables`（如果安装时装了）会保留。
 - 云厂商安全组里的 UDP/TCP 1194 规则需要自己去删。
 
 ## 8. 回退到发行版自带版本
