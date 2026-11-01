@@ -46,7 +46,7 @@ openvpn-deploy/
 **① 获取项目**（在服务器上执行，目录随意）
 
 ```bash
-git clone <仓库地址> openvpn-deploy
+git clone https://github.com/cjdxb/openvpn-deploy.git openvpn-deploy
 cd openvpn-deploy
 ```
 
@@ -65,36 +65,37 @@ cd openvpn-deploy
 ```
 VPN 网段（掩码固定 /24） [默认 10.93.1.0/24]: 
 客户端动态地址池 [默认 10.93.1.2-10.93.1.99]: 
+监听端口（UDP+TCP 共用） [默认 1194]: 
 ```
 
 也可以用参数一次性指定，指定了的项不会再询问：
 
 ```bash
-./install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99
+./install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99 --port 1194
 ```
 
 | 参数 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
 | `--net` | `VPN_NET`（兼容旧的 `VPN_PREFIX`） | `10.93.1.0/24` | VPN 网段，掩码固定 /24，也可写成 `10.93.1` |
 | `--pool` | `VPN_POOL` | `.2-.99` | 动态地址池，写全 IP 或只写最后一段（如 `2-99`）均可；不能占满 `.2-.254` |
+| `--port` | `PORT` | `1194` | 监听端口，UDP 和 TCP 共用，范围 1-65535 |
 
 优先级：参数 > 环境变量 > 交互输入 > 默认值。非交互运行（stdin 不是终端，如 `./install-openvpn.sh < /dev/null`）时不询问，直接用默认值。`./install-openvpn.sh --help` 查看用法。
 
-公网 IP 和出口网卡会自动探测。要换端口，或者服务器在 NAT 后面（探测到的是内网 IP），可以用环境变量指定：
+公网 IP 和出口网卡会自动探测。服务器在 NAT 后面（探测到的是内网 IP）或要指定出口网卡时，可以用环境变量指定：
 
 ```bash
-PUBLIC_IP=1.2.3.4 PORT=1194 WAN_IF=eth0 ./install-openvpn.sh --net 10.93.2.0/24
+PUBLIC_IP=1.2.3.4 WAN_IF=eth0 ./install-openvpn.sh --net 10.93.2.0/24
 ```
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `PUBLIC_IP` | 默认路由的源地址 | 写进客户端 `remote` 的地址 |
-| `PORT` | `1194` | UDP 和 TCP 共用这个端口 |
 | `WAN_IF` | 默认路由的网卡 | NAT 出口网卡 |
 
 成功后最后会输出 `==> 部署完成`。如果检测到 `/etc/openvpn/easy-rsa/pki` 已存在，脚本会直接退出，避免覆盖现有证书。
 
-**③ 放行端口**：在云厂商的安全组或防火墙里放行 **UDP 1194 和 TCP 1194 入站**。服务器本机的 ufw 如果开着，脚本会自动放行。
+**③ 放行端口**：在云厂商的安全组或防火墙里放行 **UDP 和 TCP 的监听端口（默认 1194）入站**。服务器本机的 ufw 如果开着，脚本会自动放行。
 
 ## 2. 新增客户端
 

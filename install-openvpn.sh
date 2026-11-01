@@ -8,8 +8,8 @@
 #   - 全局代理（redirect-gateway），NAT 规则随服务启停
 #
 # 用法（root）：
-#   ./install-openvpn.sh                                      # 未指定的网段/地址池会交互询问，直接回车用默认值
-#   ./install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99
+#   ./install-openvpn.sh                                      # 未指定的网段/地址池/端口会交互询问，直接回车用默认值
+#   ./install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99 --port 1194
 #   PUBLIC_IP=1.2.3.4 VPN_NET=10.93.1.0/24 VPN_POOL=2-99 PORT=1194 ./install-openvpn.sh
 # 部署后用同目录下的 ./add-client.sh、./revoke-client.sh 管理客户端
 set -euo pipefail
@@ -21,10 +21,11 @@ log() { echo -e "\n==> $*"; }
 die() { echo "错误: $*" >&2; exit 1; }
 usage() {
   cat <<EOF
-用法: $0 [--net 网段] [--pool 地址池]
+用法: $0 [--net 网段] [--pool 地址池] [--port 端口]
   --net   VPN 网段，掩码固定 /24，如 10.93.1.0/24（默认 10.93.1.0/24）
   --pool  客户端动态地址池，如 10.93.1.2-10.93.1.99 或 2-99（默认 .2-.99）
           池外的 .2-.254 留给 add-client.sh 分配固定 IP
+  --port  监听端口，UDP 和 TCP 共用（默认 1194）
 未指定的项会交互询问；非交互运行（stdin 不是终端）时直接用默认值。
 EOF
 }
@@ -38,16 +39,17 @@ ask() {
 
 VPN_NET="${VPN_NET:-${VPN_PREFIX:-}}"   # 兼容旧的 VPN_PREFIX 环境变量
 VPN_POOL="${VPN_POOL:-}"
+PORT="${PORT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --net)  [ $# -ge 2 ] || die "--net 缺少参数"; VPN_NET=$2; shift 2 ;;
     --pool) [ $# -ge 2 ] || die "--pool 缺少参数"; VPN_POOL=$2; shift 2 ;;
+    --port) [ $# -ge 2 ] || die "--port 缺少参数"; PORT=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "未知参数: $1" ;;
   esac
 done
 
-PORT="${PORT:-1194}"
 WAN_IF="${WAN_IF:-$(ip -4 route show default | awk '{print $5; exit}')}"
 PUBLIC_IP="${PUBLIC_IP:-$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<NF;i++) if($i=="src") print $(i+1); exit}')}"
 
@@ -75,6 +77,11 @@ POOL_START=$((10#$POOL_START)) POOL_END=$((10#$POOL_END))
 (( POOL_START > 2 || POOL_END < 254 )) || die "地址池不能占满 .2-.254，至少要给固定 IP 留一个地址"
 # 第一个可用的固定 IP 编号，用于结尾提示
 if [ "$POOL_START" -gt 2 ]; then FIRST_STATIC=2; else FIRST_STATIC=$((POOL_END + 1)); fi
+
+# 端口：UDP 和 TCP 共用
+ask PORT "监听端口（UDP+TCP 共用）" "1194"
+[[ "$PORT" =~ ^[0-9]{1,5}$ ]] && (( 1 <= 10#$PORT && 10#$PORT <= 65535 )) || die "端口 $PORT 不合法，应为 1-65535"
+PORT=$((10#$PORT))
 
 [ -n "$WAN_IF" ] && [ -n "$PUBLIC_IP" ] || die "无法探测出口网卡/公网IP，请手动指定 WAN_IF / PUBLIC_IP"
 case "$PUBLIC_IP" in
