@@ -19,7 +19,7 @@ cp "$PKI/crl.pem" /etc/openvpn/server/crl.pem
 chmod 644 /etc/openvpn/server/crl.pem
 
 # 保留 index.txt 的 R 记录和吊销证书（审计用），删掉无用的私钥/req
-rm -f "$CLIENTS/$NAME.ovpn" "/etc/openvpn/server/ccd/$NAME"
+rm -f "$CLIENTS/$NAME.ovpn" "$CLIENTS/$NAME-mikrotik.ovpn" "/etc/openvpn/server/ccd/$NAME"
 find "$PKI" \( -name "$SERIAL.key" -o -name "$SERIAL.req" -o -name "$NAME.key" -o -name "$NAME.req" \) -delete
 
 # 运行中的服务会回写 ipp.txt，必须停服务后再改
