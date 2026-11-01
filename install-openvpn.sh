@@ -8,20 +8,20 @@
 #   - 全局代理（redirect-gateway），NAT 规则随服务启停
 #
 # 用法（root）：
-#   bash install-openvpn.sh                                   # 未指定的网段/地址池会交互询问，直接回车用默认值
-#   bash install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99
-#   PUBLIC_IP=1.2.3.4 VPN_NET=10.93.1.0/24 VPN_POOL=2-99 PORT=1194 bash install-openvpn.sh
+#   ./install-openvpn.sh                                      # 未指定的网段/地址池会交互询问，直接回车用默认值
+#   ./install-openvpn.sh --net 10.93.2.0/24 --pool 10.93.2.2-10.93.2.99
+#   PUBLIC_IP=1.2.3.4 VPN_NET=10.93.1.0/24 VPN_POOL=2-99 PORT=1194 ./install-openvpn.sh
+# 部署后用同目录下的 ./add-client.sh、./revoke-client.sh 管理客户端
 set -euo pipefail
 
 EASYRSA_DIR=/etc/openvpn/easy-rsa
 SRV=/etc/openvpn/server
-CLIENTS=/root/ovpn-clients
 
 log() { echo -e "\n==> $*"; }
 die() { echo "错误: $*" >&2; exit 1; }
 usage() {
   cat <<EOF
-用法: bash $0 [--net 网段] [--pool 地址池]
+用法: $0 [--net 网段] [--pool 地址池]
   --net   VPN 网段，掩码固定 /24，如 10.93.1.0/24（默认 10.93.1.0/24）
   --pool  客户端动态地址池，如 10.93.1.2-10.93.1.99 或 2-99（默认 .2-.99）
           池外的 .2-.254 留给 add-client.sh 分配固定 IP
@@ -112,7 +112,7 @@ cd "$EASYRSA_DIR"
 EASYRSA_REQ_CN="OpenVPN-CA" ./easyrsa build-ca nopass >/dev/null 2>&1
 ./easyrsa build-server-full server nopass >/dev/null 2>&1
 ./easyrsa gen-crl >/dev/null 2>&1
-mkdir -p "$SRV/ccd" /var/log/openvpn "$CLIENTS"
+mkdir -p "$SRV/ccd" /var/log/openvpn
 cp pki/ca.crt pki/issued/server.crt pki/private/server.key pki/crl.pem "$SRV/"
 chmod 644 "$SRV/crl.pem"
 openvpn --genkey secret "$SRV/tc.key"
@@ -173,8 +173,8 @@ if command -v ufw >/dev/null && [[ "$(LC_ALL=C ufw status)" == "Status: active"*
   echo "ufw 已放行 $PORT/udp、$PORT/tcp"
 fi
 
-# ---------- 5. 管理脚本 ----------
-log "安装管理脚本到 $CLIENTS"
+# ---------- 5. 管理脚本配置（./add-client.sh、./revoke-client.sh 读取）----------
+log "写入 /etc/openvpn/ovpn.env"
 cat > /etc/openvpn/ovpn.env <<EOF
 PUBLIC_IP=$PUBLIC_IP
 VPN_PREFIX=$VPN_PREFIX
@@ -182,82 +182,6 @@ POOL_START=$POOL_START
 POOL_END=$POOL_END
 PORT=$PORT
 EOF
-
-cat > "$CLIENTS/add-client.sh" <<'SCRIPT'
-#!/bin/bash
-# 用法: add-client.sh <编号 2-254，且不在动态池内>  -> 证书 CN=client<编号>，固定 IP <VPN_PREFIX>.<编号>
-set -euo pipefail
-. /etc/openvpn/ovpn.env
-N="${1:-}"
-if ! [[ "$N" =~ ^[0-9]+$ ]] || [ "$N" -lt 2 ] || [ "$N" -gt 254 ] \
-   || { [ "$N" -ge "$POOL_START" ] && [ "$N" -le "$POOL_END" ]; }; then
-  echo "用法: $0 <编号>，可用 2-254 中除动态池 $POOL_START-$POOL_END 以外的编号"; exit 1
-fi
-NAME="client$N"
-EASYRSA=/etc/openvpn/easy-rsa
-PKI=$EASYRSA/pki
-OUT=/root/ovpn-clients/$NAME.ovpn
-[ -e "$PKI/issued/$NAME.crt" ] && { echo "$NAME 已存在"; exit 1; }
-
-cd $EASYRSA
-EASYRSA_BATCH=1 EASYRSA_ALGO=ec EASYRSA_CURVE=secp384r1 EASYRSA_DIGEST=sha384 EASYRSA_CERT_EXPIRE=3650 \
-  ./easyrsa build-client-full "$NAME" nopass >/dev/null 2>&1
-
-echo "ifconfig-push $VPN_PREFIX.$N 255.255.255.0" > /etc/openvpn/server/ccd/$NAME
-chmod 644 /etc/openvpn/server/ccd/$NAME
-
-{ cat <<CONF
-client
-dev tun
-remote $PUBLIC_IP $PORT udp
-remote $PUBLIC_IP $PORT tcp
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-auth SHA256
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-verb 3
-CONF
-echo "<ca>"; cat $PKI/ca.crt; echo "</ca>"
-echo "<cert>"; sed -n "/BEGIN CERTIFICATE/,/END CERTIFICATE/p" $PKI/issued/$NAME.crt; echo "</cert>"
-echo "<key>"; cat $PKI/private/$NAME.key; echo "</key>"
-echo "<tls-crypt>"; cat /etc/openvpn/server/tc.key; echo "</tls-crypt>"; } > $OUT
-chmod 600 $OUT
-echo "$NAME -> $VPN_PREFIX.$N  配置: $OUT"
-SCRIPT
-
-cat > "$CLIENTS/revoke-client.sh" <<'SCRIPT'
-#!/bin/bash
-# 用法: revoke-client.sh <客户端名，如 client100>
-# 吊销证书并清理残留：ovpn、ccd、吊销后的私钥/req、ipp 记录（会重启服务，断线约 3 秒）
-set -euo pipefail
-NAME="${1:-}"
-[ -n "$NAME" ] || { echo "用法: $0 <客户端名，如 client100>"; exit 1; }
-EASYRSA=/etc/openvpn/easy-rsa
-PKI=$EASYRSA/pki
-[ -e "$PKI/issued/$NAME.crt" ] || { echo "$NAME 不存在或已吊销"; exit 1; }
-SERIAL=$(openssl x509 -in "$PKI/issued/$NAME.crt" -noout -serial | cut -d= -f2)
-
-cd $EASYRSA
-export EASYRSA_BATCH=1 EASYRSA_CRL_DAYS=3650
-./easyrsa revoke "$NAME" >/dev/null 2>&1
-./easyrsa gen-crl >/dev/null 2>&1
-cp "$PKI/crl.pem" /etc/openvpn/server/crl.pem
-chmod 644 /etc/openvpn/server/crl.pem
-
-# 保留 index.txt 的 R 记录和吊销证书（审计用），删掉无用的私钥/req
-rm -f "/root/ovpn-clients/$NAME.ovpn" "/etc/openvpn/server/ccd/$NAME"
-find "$PKI" \( -name "$SERIAL.key" -o -name "$SERIAL.req" -o -name "$NAME.key" -o -name "$NAME.req" \) -delete
-
-# 运行中的服务会回写 ipp.txt，必须停服务后再改
-systemctl stop openvpn-server@server
-sed -i "/^$NAME,/d" /var/log/openvpn/ipp.txt
-systemctl start openvpn-server@server
-echo "$NAME 已吊销（serial=$SERIAL）并清理残留"
-SCRIPT
-chmod 700 "$CLIENTS/add-client.sh" "$CLIENTS/revoke-client.sh"
 
 # ---------- 6. 启动 ----------
 log "启动服务"
@@ -269,6 +193,6 @@ systemctl is-active --quiet openvpn-server@server || { journalctl -u openvpn-ser
 
 log "部署完成"
 echo "  监听: UDP+TCP $PORT    网关: ${VPN_PREFIX}.1    动态池: ${VPN_PREFIX}.${POOL_START}-${VPN_PREFIX}.${POOL_END}"
-echo "  新增客户端: $CLIENTS/add-client.sh $FIRST_STATIC      -> ${VPN_PREFIX}.$FIRST_STATIC（编号需在动态池外）"
-echo "  吊销客户端: $CLIENTS/revoke-client.sh client$FIRST_STATIC"
+echo "  新增客户端: ./add-client.sh $FIRST_STATIC      -> ${VPN_PREFIX}.$FIRST_STATIC（编号需在动态池外）"
+echo "  吊销客户端: ./revoke-client.sh client$FIRST_STATIC"
 echo "  记得在云厂商安全组放行 UDP/TCP $PORT 入站"
