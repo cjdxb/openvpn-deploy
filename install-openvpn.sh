@@ -130,7 +130,8 @@ log "写入 $SRV/server.conf"
 cat > "$SRV/server.conf" <<EOF
 local 0.0.0.0 $PORT udp
 local 0.0.0.0 $PORT tcp
-dev tun
+dev ovpn0
+dev-type tun
 topology subnet
 server ${VPN_PREFIX}.0 255.255.255.0 nopool
 ifconfig-pool ${VPN_PREFIX}.${POOL_START} ${VPN_PREFIX}.${POOL_END} 255.255.255.0
@@ -169,11 +170,11 @@ mkdir -p /etc/systemd/system/openvpn-server@server.service.d
 cat > /etc/systemd/system/openvpn-server@server.service.d/nat.conf <<EOF
 [Service]
 ExecStartPost=/usr/sbin/iptables -t nat -A POSTROUTING -s $NET -o $WAN_IF -j MASQUERADE
-ExecStartPost=/usr/sbin/iptables -I FORWARD -i tun0 -o $WAN_IF -s $NET -j ACCEPT
-ExecStartPost=/usr/sbin/iptables -I FORWARD -i $WAN_IF -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+ExecStartPost=/usr/sbin/iptables -I FORWARD -i ovpn0 -o $WAN_IF -s $NET -j ACCEPT
+ExecStartPost=/usr/sbin/iptables -I FORWARD -i $WAN_IF -o ovpn0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 ExecStopPost=/usr/sbin/iptables -t nat -D POSTROUTING -s $NET -o $WAN_IF -j MASQUERADE
-ExecStopPost=/usr/sbin/iptables -D FORWARD -i tun0 -o $WAN_IF -s $NET -j ACCEPT
-ExecStopPost=/usr/sbin/iptables -D FORWARD -i $WAN_IF -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+ExecStopPost=/usr/sbin/iptables -D FORWARD -i ovpn0 -o $WAN_IF -s $NET -j ACCEPT
+ExecStopPost=/usr/sbin/iptables -D FORWARD -i $WAN_IF -o ovpn0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 EOF
 if command -v ufw >/dev/null && [[ "$(LC_ALL=C ufw status)" == "Status: active"* ]]; then
   ufw allow "$PORT"/udp >/dev/null; ufw allow "$PORT"/tcp >/dev/null

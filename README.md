@@ -135,7 +135,7 @@ scp root@<服务器IP>:<项目目录>/clients/client100.ovpn .
 ```bash
 systemctl status openvpn-server@server            # active (running)
 ss -lnup | grep 1194; ss -lntp | grep 1194        # UDP 和 TCP 都在监听，同一个 pid
-ip -4 addr show tun0                              # 10.93.1.1/24
+ip -4 addr show ovpn0                             # 10.93.1.1/24
 iptables -t nat -S POSTROUTING | grep 10.93.1     # MASQUERADE 规则
 journalctl -u openvpn-server@server -n 30         # 不应有 WARNING / DEPRECATED
 ```
