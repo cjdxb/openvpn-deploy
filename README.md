@@ -46,7 +46,7 @@ openvpn-deploy/
 **① 获取项目**（在服务器上执行，目录随意）
 
 ```bash
-git clone <仓库地址> openvpn-deploy
+git clone https://github.com/cjdxb/openvpn-deploy.git openvpn-deploy
 cd openvpn-deploy
 ```
 
