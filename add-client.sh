@@ -1,14 +1,21 @@
 #!/bin/bash
-# 用法: ./add-client.sh <编号 2-254，且不在动态池内>  -> 证书 CN=client<编号>，固定 IP <VPN_PREFIX>.<编号>
-# 配置输出到项目目录下的 clients/<名字>.ovpn，MikroTik 路由器用 clients/<名字>-mikrotik.ovpn
+# 用法: ./add-client.sh <编号 2-254，且不在动态池内> [--mikrotik]  -> 证书 CN=client<编号>，固定 IP <VPN_PREFIX>.<编号>
+# 配置输出到项目目录下的 clients/<名字>.ovpn；加 --mikrotik 时额外生成 MikroTik 路由器用的 clients/<名字>-mikrotik.ovpn
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "请用 root 运行"; exit 1; }
 [ -r /etc/openvpn/ovpn.env ] || { echo "未找到 /etc/openvpn/ovpn.env，请先运行 ./install-openvpn.sh"; exit 1; }
 . /etc/openvpn/ovpn.env
-N="${1:-}"
+N=""
+MIKROTIK=0
+for a in "$@"; do
+  case "$a" in
+    --mikrotik) MIKROTIK=1 ;;
+    *) N="$a" ;;
+  esac
+done
 if ! [[ "$N" =~ ^[0-9]+$ ]] || [ "$N" -lt 2 ] || [ "$N" -gt 254 ] \
    || { [ "$N" -ge "$POOL_START" ] && [ "$N" -le "$POOL_END" ]; }; then
-  echo "用法: $0 <编号>，可用 2-254 中除动态池 $POOL_START-$POOL_END 以外的编号"; exit 1
+  echo "用法: $0 <编号> [--mikrotik]，可用 2-254 中除动态池 $POOL_START-$POOL_END 以外的编号"; exit 1
 fi
 NAME="client$N"
 EASYRSA=/etc/openvpn/easy-rsa
@@ -52,6 +59,11 @@ verb 3
 CONF
 inline; } > "$OUT"
 chmod 600 "$OUT"
+
+if [ "$MIKROTIK" -eq 0 ]; then
+  echo "$NAME -> $VPN_PREFIX.$N  配置: $OUT"
+  exit 0
+fi
 
 # MikroTik RouterOS 7.17+：不支持 NCP，须用 cipher 指定；只认单个 remote + proto；tls-crypt 要求客户端 key-direction 1
 { cat <<CONF

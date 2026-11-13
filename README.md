@@ -107,7 +107,7 @@ PUBLIC_IP=1.2.3.4 WAN_IF=eth0 ./install-openvpn.sh --net 10.93.2.0/24
 ```
 
 - 签发证书 `client100`，固定 IP `10.93.1.100`
-- 生成 `clients/client100.ovpn` 和 MikroTik 专用的 `clients/client100-mikrotik.ovpn`（项目目录下）
+- 生成 `clients/client100.ovpn`（项目目录下）；加 `--mikrotik` 参数（`./add-client.sh 100 --mikrotik`）时额外生成 MikroTik 专用的 `clients/client100-mikrotik.ovpn`
 - 编号可用 2–254 中**动态池以外**的值（默认池 `.2–.99` 时即 100–254）；编号已存在时脚本会报错退出
 - **不用重启服务**
 
@@ -121,7 +121,7 @@ scp root@<服务器IP>:<项目目录>/clients/client100.ovpn .
 
 ### MikroTik 路由器
 
-RouterOS 的 OpenVPN 是自己实现的，通用 `.ovpn` 导不进去（不支持 `data-ciphers` 协商、只认一个 `remote`），要用 `client100-mikrotik.ovpn`：
+RouterOS 的 OpenVPN 是自己实现的，通用 `.ovpn` 导不进去（不支持 `data-ciphers` 协商、只认一个 `remote`），要用 `./add-client.sh 100 --mikrotik` 生成的 `client100-mikrotik.ovpn`：
 
 - 需要 **RouterOS 7.17 及以上**（tls-crypt 从 7.17 开始支持）
 - 只走 UDP，固定 `cipher AES-256-GCM`；需要 TCP 时导入后把接口的 `protocol` 改成 `tcp`
